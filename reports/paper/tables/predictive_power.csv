@@ -1,0 +1,4 @@
+horizon,n_obs,n_periods,ic_equal_weight,ic_obs_weighted,spearman_pooled,hit_rate,q5_minus_q1
+1y,8624,40,0.051,0.0542,0.0939,0.5259,0.1482
+3y,6039,32,0.0751,0.0998,0.165,0.5493,0.1214
+5y,4003,24,0.0989,0.1299,0.1829,0.5419,0.107

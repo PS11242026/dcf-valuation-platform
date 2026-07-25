@@ -1,0 +1,15 @@
+signal,sector,allocation_ann,selection_ann,contribution_ann,avg_book_weight
+discount,consumer_discretionary,0.006,0.0256,0.0316,0.36
+discount,consumer_staples,0.0126,0.0151,0.0277,0.16
+discount,industrials_assetlight_services,-0.0103,0.0311,0.0209,0.212
+discount,internet_platforms_marketplaces,0.002,0.0187,0.0207,0.088
+discount,semiconductors,-0.0112,0.0193,0.0081,0.071
+discount,semiconductor_equipment,-0.002,0.0013,-0.0007,0.036
+discount,software_saas_infra,-0.021,0.0156,-0.0054,0.074
+discount_x_conf,internet_platforms_marketplaces,0.0132,0.0288,0.042,0.171
+discount_x_conf,consumer_staples,0.0209,0.0158,0.0367,0.281
+discount_x_conf,consumer_discretionary,-0.0097,0.02,0.0103,0.24
+discount_x_conf,industrials_assetlight_services,-0.0265,0.0324,0.0059,0.145
+discount_x_conf,semiconductor_equipment,-0.0002,0.0009,0.0007,0.038
+discount_x_conf,software_saas_infra,-0.0195,0.0163,-0.0033,0.079
+discount_x_conf,semiconductors,-0.019,0.0048,-0.0142,0.045

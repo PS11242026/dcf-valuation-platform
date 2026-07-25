@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+dist/
+
+# Environment / secrets
+.env
+
+# Local caches and logs
+.cache/
+*.log
+
+# Model / data dumps (regenerable)
+*.pkl
+*.npz
+
+# Generated report trees. The CLI writes valuations, portfolio builds, managed
+# books, etc. under reports/ — those are regenerable and stay out of git.
+# The curated samples that ARE tracked live under examples/, reports/paper/, and site/.
+/reports/*
+!/reports/paper/
+reports/paper/**/*.docx
+
+# OS / editor / tooling
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.claude/
