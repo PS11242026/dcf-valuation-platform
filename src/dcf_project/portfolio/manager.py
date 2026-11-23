@@ -97,6 +97,15 @@ def _bench_returns(bench_entry: dict[str, float], px: dict[str, float]):
     return {bm: (px[bm] / e - 1.0) if (px.get(bm) and e) else None for bm, e in bench_entry.items()}
 
 
+def _live_discount(ci, price):
+    """Discount to intrinsic re-marked at the current price (intrinsic / price - 1); falls back to
+    the discount stored with the intrinsic snapshot when either side is missing."""
+    iv = ci.get("intrinsic")
+    if iv and price and price > 0:
+        return iv / price - 1.0
+    return ci.get("discount")
+
+
 def _holding_rows(book, cur, intr, capital, cash: float = 0.0):
     """Per-name detail rows. Entry/current price are first-class columns (the questions a PM asks
     first); contributions sum to the book return under either weighting scheme. `entry_value` is
@@ -119,7 +128,7 @@ def _holding_rows(book, cur, intr, capital, cash: float = 0.0):
                 "return": (c / e - 1.0) if (e and c) else None,
                 "contribution": ((r.get("shares") or 0) * ((c or e or 0) - (e or 0)) / base) if base else None,
                 "inception_discount": r.get("discount_to_intrinsic", r.get("discount")),
-                "current_discount": ci.get("discount"),
+                "current_discount": _live_discount({**ci, "intrinsic": ci.get("intrinsic", r.get("intrinsic"))}, c),
                 "current_intrinsic": ci.get("intrinsic", r.get("intrinsic")),
                 "conviction": r.get("conf", r.get("selection_rank")),
             })
@@ -139,7 +148,7 @@ def _holding_rows(book, cur, intr, capital, cash: float = 0.0):
                 "weight": w_now,
                 "market_value": (capital / len(book) * (1 + ret)) if (capital and len(book) and ret is not None) else None,
                 "return": ret, "contribution": (ret / n_valid) if (ret is not None and n_valid) else None,
-                "inception_discount": r.get("discount"), "current_discount": ci.get("discount"),
+                "inception_discount": r.get("discount"), "current_discount": _live_discount(ci, c),
                 "current_intrinsic": ci.get("intrinsic"), "conviction": r.get("conf"),
             })
     rows.sort(key=lambda x: (x["inception_discount"] is not None, x["inception_discount"]), reverse=True)

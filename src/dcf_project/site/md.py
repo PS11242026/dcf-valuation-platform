@@ -17,6 +17,16 @@ _INLINE = [
      r'<a href="\2" target="_blank" rel="noopener">\1</a>'),
 ]
 
+_UL = re.compile(r"^[-*]\s+")
+_OL = re.compile(r"^\d+\.\s+")
+
+
+def _is_text(raw: str) -> bool:
+    """A plain paragraph line: not blank and not the start of another block."""
+    t = raw.strip()
+    return bool(t) and not (t.startswith(("#", ">", "```")) or t in ("---", "***")
+                            or _UL.match(t) or _OL.match(t))
+
 
 def _inline(s: str) -> str:
     for rx, rep in _INLINE:
@@ -79,16 +89,20 @@ def render(text: str) -> str:
                 close_blocks()
                 out.append("<ul>")
                 in_ul = True
-            out.append(f"<li>{_inline(re.sub(r'^[-*]\\s+', '', stripped))}</li>")
+            out.append(f"<li>{_inline(_UL.sub('', stripped))}</li>")
         elif re.match(r"\d+\.\s+", stripped):
             if not in_ol:
                 close_blocks()
                 out.append("<ol>")
                 in_ol = True
-            out.append(f"<li>{_inline(re.sub(r'^\\d+\\.\\s+', '', stripped))}</li>")
+            out.append(f"<li>{_inline(_OL.sub('', stripped))}</li>")
         else:
             close_blocks()
-            out.append(f"<p>{_inline(stripped)}</p>")
+            para = [stripped]  # hard-wrapped lines join into one paragraph until a block starts
+            while i + 1 < n and _is_text(lines[i + 1]):
+                i += 1
+                para.append(html.escape(lines[i].strip(), quote=False))
+            out.append(f"<p>{_inline(' '.join(para))}</p>")
         i += 1
     close_blocks()
     return "\n".join(out)

@@ -18,6 +18,7 @@ from __future__ import annotations
 import datetime as dt
 import html
 import json
+import os
 import re
 import shutil
 from pathlib import Path
@@ -72,10 +73,11 @@ DEFAULT_CONFIG = {
     "tagline": "Institutional-grade equity research. One disciplined signal.",
     "contact_email": "research@example.com",          # EDIT
     "refresh_seconds": 60,
-    "quote_seconds": 20,
+    "quote_seconds": 60,                               # free feed tier: 60 calls/min shared by viewers
     "news_seconds": 300,
     "finnhub_key": "",                                 # feed key: live quotes + live news wire
     "custom_domain": "",                               # e.g. phoenixcapitaldesk.com (writes CNAME)
+    "code_url": "https://github.com/PS11242026/dcf-valuation-platform",
     "books": [
         {"key": "us", "name": "conf_top10", "label": "US Deep-Discount 10",
          "nav": "Portfolio", "flag": "us", "status_badge": "live"},
@@ -103,8 +105,8 @@ DISCLAIMER = (
     "books published for research and education; nothing here is a solicitation to buy or sell "
     "any security, and no client assets are managed through this site. Phoenix Capital is a "
     "research publication: the publisher is not a SEBI-registered Portfolio Manager / Investment "
-    "Adviser and not a US SEC-registered investment adviser; subscriptions purchase access to "
-    "research content only. Backtested figures are labeled and survivorship-caveated where "
+    "Adviser and not a US SEC-registered investment adviser; no subscriptions or paid research are "
+    "offered; this is a portfolio project. Backtested figures are labeled and survivorship-caveated where "
     "applicable; live records are short. Past performance, simulated or live, does not predict "
     "future returns. Markets carry risk of loss, including total loss."
 )
@@ -166,6 +168,8 @@ def load_config():
     cfg = dict(DEFAULT_CONFIG)
     user = _load(SITE_CONTENT / "site.json", {})
     cfg.update(user or {})
+    if os.environ.get("DCF_FINNHUB_KEY"):  # CI secret beats the file, so the key never sits in git
+        cfg["finnhub_key"] = os.environ["DCF_FINNHUB_KEY"].strip()
     return cfg
 
 
@@ -224,7 +228,7 @@ def _page(cfg, books, *, title, active, body, embed=None, depth=0, asof=""):
     items += [(b["cfg"]["key"], f'{b["cfg"]["key"]}.html', b["cfg"].get("nav", b["cfg"]["label"]))
               for b in books.values()]
     items += [("research", "research.html", "Research"),
-              ("pricing", "pricing.html", "Membership"),
+              ("pricing", "pricing.html", "Project"),
               ("about", "about.html", "Methodology")]
     nav = "".join(f'<a href="{pre}{href}" class="{"on" if active == key else ""}">{label}</a>'
                   for key, href, label in items)
@@ -250,6 +254,7 @@ def _page(cfg, books, *, title, active, body, embed=None, depth=0, asof=""):
   <nav class="main">{nav}</nav>
   <span class="asof"><span class="feedpill pill" id="feedpill">EOD</span><span class="txt">{_esc(asof)}</span></span>
 </div></header>
+<div class="demo-banner" style="background:#7a5a00;color:#fff;text-align:center;padding:8px 16px;font-size:13.5px;line-height:1.4"><b>Portfolio project.</b> A model (paper) portfolio built with my <a href="{_esc(cfg["code_url"])}" style="color:#fff;text-decoration:underline">open-source DCF engine</a>. Not a commercial offering and not investment advice.</div>
 <main><div class="wrap">
 {body}
 </div></main>
@@ -257,7 +262,7 @@ def _page(cfg, books, *, title, active, body, embed=None, depth=0, asof=""):
   <p class="disc">{DISCLAIMER}</p>
   <div class="foot-meta"><span>© {year} {_esc(cfg["brand"])}</span>
     <span>{_esc(cfg["contact_email"])}</span>
-    <span>data: end-of-day pipeline{" + live feed" if cfg.get("finnhub_key") else " · live feed ready (add key)"}</span></div>
+    <span>data: scheduled cloud pipeline{" + live intraday feed" if cfg.get("finnhub_key") else ""}</span></div>
 </div></footer>
 {data}<script src="{pre}assets/site.js"></script>
 </body></html>"""
@@ -451,7 +456,7 @@ def page_index(cfg, books, posts):
     watermark = ('<img src="assets/logo-white.png" alt="">' if cfg.get("_logo") else _mark(360, "hm-svg"))
     hero = f"""<div class="hero">
   <div class="h-mark" aria-hidden="true">{watermark}</div>
-  <div class="h-eyebrow">{_esc(cfg["brand"])} · premium equity research</div>
+  <div class="h-eyebrow">{_esc(cfg["brand"])} · model portfolio research</div>
   <h1 class="h-title">Own the gap between price and&nbsp;value.</h1>
   <p class="h-lede">A concentrated model portfolio built on one disciplined signal — full DCF
   intrinsic values, ranked, validated, and published with every caveat that institutional
@@ -461,7 +466,7 @@ def page_index(cfg, books, posts):
     <span class="h-chip"><b class="{_cls(active)}">{_pp(active)}</b> vs S&amp;P 500</span>
     <span class="h-chip"><b>{_pct(ev.get("backtest_alpha_spy"))}</b>/yr backtest alpha<sup>†</sup></span>
   </div>
-  <div class="h-ctas"><a class="cta gold" href="pricing.html">Become a member</a>
+  <div class="h-ctas"><a class="cta gold" href="{_esc(cfg["code_url"])}">View the code</a>
   <a class="cta ghost-inv" href="about.html">Read the methodology</a></div>
   <p class="h-foot">† 42-quarter backtest, net of costs, survivorship-caveated — details on the methodology page.</p>
 </div>"""
@@ -552,24 +557,23 @@ def page_post(cfg, books, p):
 
 
 def page_pricing(cfg, books):
-    plans = []
-    for pl in cfg["plans"]:
-        items = "".join(f"<li>{_esc(i)}</li>" for i in pl["items"])
-        ribbon = f'<div class="ribbon">{_esc(pl["ribbon"])}</div>' if pl.get("ribbon") else ""
-        plans.append(f"""<div class="plan {"hi" if pl.get("hi") else ""}">{ribbon}
-<div class="nm">{_esc(pl["name"])}</div><div class="pr tab">{_esc(pl["price"])}</div>
-<div class="per">{_esc(pl["per"])}</div><ul>{items}</ul>
-<a class="cta {"gold" if pl.get("hi") else "ghost"}" href="mailto:{_esc(cfg["contact_email"])}?subject={_esc(pl["name"])} membership">{_esc(pl["cta"])}</a></div>""")
-    body = f"""<p class="eyebrow">Membership</p><h1>Access the desk's work as it happens</h1>
-<p class="lede">Membership buys <b>research access</b> — the daily notes, the live dashboard feed,
-full statistics and the rationale behind every portfolio action. It does not buy portfolio
-management, and we say so plainly: that is what keeps this work independent.</p>
-<div class="plans" style="margin-top:26px">{"".join(plans)}</div>
-<section><div class="callout"><b>Regulatory note.</b> Managing client money for a fee requires
-registration (SEBI PMS/RIA in India; SEC/state RIA in the US). Until such registration is in
-place this site sells research publication only, and the model portfolio remains a paper book.
+    """'Project' page (kept at pricing.html so old links resolve): what this site is and is not."""
+    code = _esc(cfg["code_url"])
+    body = f"""<p class="eyebrow">About this project</p><h1>A portfolio project, not a business</h1>
+<p class="lede">{_esc(cfg["brand"])} is a <b>demonstration site</b> for my
+<a href="{code}">DCF Valuation Platform</a>: a Kalman-filtered, state-space DCF engine whose
+intrinsic values drive a concentrated <b>model (paper) portfolio</b>. Nothing here is for sale,
+no subscriptions exist, and no client money is managed.</p>
+<div class="plans" style="margin-top:26px"><div class="plan ">
+<div class="nm">Explore the model</div><ul><li>Dashboard and full holdings history</li><li>Research notes and rebalance rationale</li><li>Methodology and validation evidence</li></ul>
+<a class="cta ghost" href="us.html">See the portfolio</a></div><div class="plan hi">
+<div class="nm">Read the code</div><ul><li>Valuation engine, portfolio and research layers</li><li>Backtests, ledgers and validation suites</li><li>Excel workbooks as the primary deliverable</li></ul>
+<a class="cta gold" href="{code}">View on GitHub</a></div></div>
+<section><div class="callout"><b>Regulatory note.</b> The publisher is not registered with SEBI
+(as a Research Analyst, Investment Adviser or Portfolio Manager) or with the US SEC. This site is
+published for education and as a portfolio piece only; it offers no paid research or advice.
 </div></section>"""
-    return _page(cfg, books, title="Membership", active="pricing", body=body)
+    return _page(cfg, books, title="About this project", active="pricing", body=body)
 
 
 def page_about(cfg, books):
