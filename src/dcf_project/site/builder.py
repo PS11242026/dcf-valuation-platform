@@ -78,7 +78,8 @@ DEFAULT_CONFIG = {
     "finnhub_key": "",                                 # feed key: live quotes + live news wire
     "custom_domain": "",                               # e.g. phoenixcapitaldesk.com (writes CNAME)
     "code_url": "https://github.com/PS11242026/dcf-valuation-platform",
-    "api_url": "",                                     # on-demand analysis API (deploy/hf-space)
+    "api_url": "",                                     # on-demand analysis JSON API (deploy/hf-space*)
+    "analyzer_url": "",                                # embedded Streamlit analyzer (deploy/streamlit)
     "books": [
         {"key": "us", "name": "conf_top10", "label": "US Deep-Discount 10",
          "nav": "Portfolio", "flag": "us", "status_badge": "live"},
@@ -173,6 +174,8 @@ def load_config():
         cfg["finnhub_key"] = os.environ["DCF_FINNHUB_KEY"].strip()
     if os.environ.get("DCF_API_URL"):      # on-demand analysis backend (Analyze page)
         cfg["api_url"] = os.environ["DCF_API_URL"].strip()
+    if os.environ.get("DCF_ANALYZER_URL"):
+        cfg["analyzer_url"] = os.environ["DCF_ANALYZER_URL"].strip()
     return cfg
 
 
@@ -237,7 +240,8 @@ def _page(cfg, books, *, title, active, body, embed=None, depth=0, asof=""):
               ("about", "about.html", "Methodology")]
     nav = "".join(f'<a href="{pre}{href}" class="{"on" if active == key else ""}">{label}</a>'
                   for key, href, label in items)
-    desk = {"api_url": (cfg.get("api_url") or "").rstrip("/"), "finnhub_key": cfg.get("finnhub_key", ""),
+    desk = {"api_url": (cfg.get("api_url") or "").rstrip("/"),
+            "analyzer_url": (cfg.get("analyzer_url") or "").rstrip("/"), "finnhub_key": cfg.get("finnhub_key", ""),
             "prefix": pre, "code_url": cfg.get("code_url", "")}
     data = ""
     if embed is not None:
@@ -645,9 +649,9 @@ def _desk_embed(books):
 def page_analyze(cfg, books):
     picks = "".join(f'<button type="button" class="qpick" data-tk="{_esc(u["ticker"])}">{_esc(u["ticker"])}</button>'
                     for u in _universe(books)[:10])
-    offline = "" if cfg.get("api_url") else (
+    offline = "" if (cfg.get("api_url") or cfg.get("analyzer_url")) else (
         '<div class="callout" style="margin-top:14px"><b>Analysis server not configured.</b> '
-        'Set <code>api_url</code> in site.json (or DCF_API_URL) to the deployed API.</div>')
+        'Set <code>analyzer_url</code> (Streamlit app) or <code>api_url</code> in site.json.</div>')
     body = f"""<p class="eyebrow">On-demand research</p><h1>Analyze any company</h1>
 <p class="lede">Type a US ticker. The platform pulls the company's SEC filings and market data,
 runs the <b>Kalman-filtered state-space DCF</b> live, and returns the full report (valuation, forecast,

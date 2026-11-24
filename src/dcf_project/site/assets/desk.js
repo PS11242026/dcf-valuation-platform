@@ -7,6 +7,7 @@
 (function () {
   const DESK = window.DESK || {};
   const API = (DESK.api_url || "").replace(/\/$/, "");
+  const ANALYZER = (DESK.analyzer_url || "").replace(/\/$/, "");   // embedded Streamlit analyzer
   const KEY = DESK.finnhub_key || "";
   const PRE = DESK.prefix || "";
   const UNIVERSE = window.DESK_UNIVERSE || [];
@@ -142,7 +143,7 @@
     form.addEventListener("submit", e => { e.preventDefault(); const t = input.value.trim().toUpperCase(); if (t) start(t, false); });
     qa(".qpick").forEach(b => b.addEventListener("click", () => { input.value = b.dataset.tk; start(b.dataset.tk, false); }));
     const t0 = new URLSearchParams(location.search).get("t");
-    if (t0) { input.value = t0.toUpperCase(); start(t0.toUpperCase(), false); }
+    if (t0) { input.value = t0.toUpperCase(); start(t0.toUpperCase(), false, true); }
   }
   const STEPS = ["Fetching SEC filings and market data", "Fitting the Kalman state-space FCF model",
     "Discounting cash flows and terminal value", "Running sensitivity and building the report"];
@@ -154,7 +155,17 @@
       <ol class="az-steps">${STEPS.map((s, i) => `<li class="${waking ? "" : i < si ? "done" : i === si ? "on" : ""}">${s}</li>`).join("")}</ol>
       <p class="az-msg">${esc(msg)}</p></div>`;
   }
-  async function start(t, refresh) {
+  function embedAnalyzer(t, scroll) {
+    history.replaceState(null, "", `?t=${encodeURIComponent(t)}`);
+    const src = `${ANALYZER}/?embed=true&embed_options=light_theme&from=site&t=${encodeURIComponent(t)}`;
+    q("#az-status").innerHTML = `<p class="fine az-note">Running live on the analysis server. A full report takes about 20–60 seconds.
+      If it shows a sleep screen, press its wake-up button and give it a minute (free hosting sleeps when idle).
+      <a href="${esc(src.replace("embed=true&embed_options=light_theme&from=site&", ""))}" target="_blank" rel="noopener">Open full screen ↗</a></p>`;
+    q("#az-report").innerHTML = `<div class="az-frame"><iframe src="${esc(src)}" title="DCF report for ${esc(t)}" loading="eager"></iframe></div>`;
+    if (scroll) q("#az-report").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  async function start(t, refresh, fromUrl) {
+    if (ANALYZER) return embedAnalyzer(t, !fromUrl);
     const tok = ++runToken;
     history.replaceState(null, "", `?t=${encodeURIComponent(t)}`);
     q("#az-report").innerHTML = "";
@@ -477,7 +488,39 @@
 
   function rerender() { basketPage(); renderPortfolios(); }
 
+  /* ======================= hand-off from the analyzer ======================= */
+  // The embedded analyzer posts {type:"phx-save", item}; opened standalone it links to
+  // basket.html?add=<base64url JSON>. Either way only whitelisted, typed fields are kept.
+  function cleanItem(x) {
+    if (!x || typeof x !== "object") return null;
+    const t = String(x.ticker || "").toUpperCase();
+    if (!/^[A-Z][A-Z0-9]{0,9}([.\-][A-Z0-9]{1,3})?$/.test(t)) return null;
+    const num = v => (typeof v === "number" && isFinite(v) ? v : null);
+    const str = (v, n) => (typeof v === "string" ? v.slice(0, n) : "");
+    return { ticker: t, company: str(x.company, 80), intrinsic: num(x.intrinsic), price: num(x.price),
+      discount: num(x.discount), verdict: str(x.verdict, 30), p10: num(x.p10), p90: num(x.p90),
+      analyzed_at: str(x.analyzed_at, 40), source: "analysis" };
+  }
+  window.addEventListener("message", e => {
+    let host = ""; try { host = new URL(e.origin).hostname; } catch (_) { return; }
+    const ok = /\.streamlit\.app$/.test(host) || host === "localhost" || host === "127.0.0.1";
+    if (!ok || !e.data || e.data.type !== "phx-save") return;
+    const it = cleanItem(e.data.item);
+    if (it) addToBasket(it);
+  });
+  function addFromLink() {
+    const p = new URLSearchParams(location.search), raw = p.get("add");
+    if (!raw) return;
+    try {
+      const it = cleanItem(JSON.parse(atob(raw.replace(/-/g, "+").replace(/_/g, "/"))));
+      if (it) addToBasket(it);
+    } catch (_) { /* ignore a malformed link */ }
+    p.delete("add");
+    history.replaceState(null, "", location.pathname + (p.toString() ? "?" + p : ""));
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
+    addFromLink();
     badge(); holdingsButtons(); analyzePage(); basketPage(); portfoliosPage();
     if (KEY) setInterval(() => { basketPrices(); if (q("#pf-list")) renderPortfolios(); }, 60000);
   });
