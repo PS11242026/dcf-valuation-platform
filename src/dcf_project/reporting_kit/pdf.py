@@ -63,6 +63,9 @@ class _Doc:
     def _open(self) -> None:
         self.fig = self.plt.figure(figsize=PAGE)
         self.fig.patch.set_facecolor("white")
+        # Report text is literal: "$13.3M x ... = $269.6M" must not be parsed as mathtext.
+        _text = self.fig.text
+        self.fig.text = lambda *a, **k: _text(*a, **{"parse_math": False, **k})
         self.page += 1
         self.y = TOP
 
@@ -172,6 +175,8 @@ class _Doc:
                             colWidths=col_fracs, loc="upper center", bbox=[0, 0, 1, 1])
             mtab.auto_set_font_size(False)
             mtab.set_fontsize(font)
+            for cell in mtab.get_celld().values():
+                cell.get_text().set_parse_math(False)
             total_idx = len(text_rows) if (tbl.total_row and text_rows) else None
             for (ri, _ci), cell in mtab.get_celld().items():
                 cell.set_edgecolor(RULE)

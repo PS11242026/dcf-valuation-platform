@@ -11,9 +11,17 @@ import base64
 import datetime as dt
 import json
 import math
+import os
 import re
 from pathlib import Path
 from typing import Any
+
+# engine_v3 = the Fundamentals Fade DCF (the engine behind the published model portfolio);
+# "v1" = the frozen canonical state-space DCF. Override per deploy with DCF_ENGINE.
+DEFAULT_ENGINE = os.environ.get("DCF_ENGINE", "v3")
+ENGINE_LABEL = {"v1": "Canonical state-space DCF (engine v1)", "v2": "Bayesian state-space DCF (engine v2)",
+                "v3": "Fundamentals Fade DCF (engine v3)"}
+WORKBOOK = {"v3": "fade_dcf.xlsx"}
 
 TICKER_RE = re.compile(r"^[A-Z][A-Z0-9]{0,9}([.\-][A-Z0-9]{1,3})?$")
 
@@ -83,11 +91,12 @@ def _series(rows: list[dict], key: str) -> list:
     return [_clean(r.get(key)) for r in rows]
 
 
-def analyze(ticker: str, out_root: Path | None = None) -> dict:
-    """Run the canonical valuation for one ticker and return the web report dict.
+def analyze(ticker: str, out_root: Path | None = None, engine: str | None = None) -> dict:
+    """Value one ticker with the selected engine and return the web report dict.
 
-    Side effects: writes canonical_dcf.xlsx and <TICKER>.pdf under ``out_root/<TICKER>/`` so
-    the API can serve them as downloads."""
+    Default engine is v3 (Fundamentals Fade, the model portfolio's engine). Side effects: writes
+    the workbook (fade_dcf.xlsx / canonical_dcf.xlsx) and <TICKER>.pdf under ``out_root/<TICKER>/``
+    so they can be served as downloads."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -95,12 +104,15 @@ def analyze(ticker: str, out_root: Path | None = None) -> dict:
     from dcf_project.reporting_kit import pdf, xlsx
     from dcf_project.valuation.canonical import canonical_valuation
     from dcf_project.valuation.report import build_canonical_model, company_display_name
+    from dcf_project.valuation.report_fade import build_fade_model
+
+    engine = (engine or DEFAULT_ENGINE).lower()
 
     t = normalize_ticker(ticker)
     folder = Path(out_root or VALUATION) / t
     folder.mkdir(parents=True, exist_ok=True)
     try:
-        sc = canonical_valuation(t)
+        sc = canonical_valuation(t, engine=engine)
     except Exception as e:
         msg = str(e).strip() or e.__class__.__name__
         if "No SEC CIK" in msg:
@@ -112,11 +124,13 @@ def analyze(ticker: str, out_root: Path | None = None) -> dict:
         raise AnalysisError(f"The DCF engine returned no intrinsic value for {t}.")
     name = company_display_name(t)
     sc["company_name"] = name
-    model = build_canonical_model(sc, folder)
+    used = str(getattr(res, "engine_version", engine) or engine)
+    model = (build_fade_model if used == "v3" else build_canonical_model)(sc, folder)
+    wb = WORKBOOK.get(used, "canonical_dcf.xlsx")
     files = {}
     try:
-        xlsx.render(model, folder / "canonical_dcf.xlsx")
-        files["xlsx"] = "canonical_dcf.xlsx"
+        xlsx.render(model, folder / wb)
+        files["xlsx"] = wb
     except Exception:
         pass
     try:
@@ -143,7 +157,8 @@ def analyze(ticker: str, out_root: Path | None = None) -> dict:
         "market_cap": sc.get("market_cap"),
         "assumptions": sc.get("assumptions"),
         "why": sc.get("why"), "qualifiers": sc.get("qualifiers"),
-        "engine": getattr(res, "engine_version", "v1"),
+        "engine": used, "engine_label": ENGINE_LABEL.get(used, f"engine {used}"),
+        "model_title": model.subtitle,
         "forecast": {"period": _series(ff, period_key) if period_key else list(range(1, len(ff) + 1)),
                      "revenue": _series(ff, "revenue"), "fcf": _series(ff, "fcf"),
                      "ebit": _series(ff, "ebit")},

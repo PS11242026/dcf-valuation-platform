@@ -654,8 +654,9 @@ def page_analyze(cfg, books):
         'Set <code>analyzer_url</code> (Streamlit app) or <code>api_url</code> in site.json.</div>')
     body = f"""<p class="eyebrow">On-demand research</p><h1>Analyze any company</h1>
 <p class="lede">Type a US ticker. The platform pulls the company's SEC filings and market data,
-runs the <b>Kalman-filtered state-space DCF</b> live, and returns the full report (valuation, forecast,
-sensitivity, drivers and thesis), with the Excel workbook and PDF to download.</p>
+runs the <b>Fundamentals Fade DCF</b> live (engine v3, the same engine behind the model portfolio) and returns the
+full report (valuation, fade drivers, CAP &amp; persistence, terminal value, sensitivity, attribution and
+thesis), with the Excel workbook and PDF to download.</p>
 <form class="az-form" id="az-form" autocomplete="off">
   <input id="az-input" class="az-input" placeholder="Ticker, e.g. KO, MSFT, COST" maxlength="14"
          aria-label="Ticker symbol" spellcheck="false">

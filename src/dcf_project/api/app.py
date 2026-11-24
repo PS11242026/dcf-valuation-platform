@@ -39,7 +39,7 @@ ORIGINS = [o.strip() for o in os.environ.get(
     "DCF_API_ORIGINS",
     "https://ps11242026.github.io,http://localhost:8000,http://127.0.0.1:8000").split(",") if o.strip()]
 OUT_ROOT = Path(os.environ.get("DCF_API_OUT") or VALUATION)
-ALLOWED_FILES = {"canonical_dcf.xlsx"}
+ALLOWED_FILES = {"canonical_dcf.xlsx", "fade_dcf.xlsx"}
 
 app = FastAPI(title="DCF Valuation Platform API", docs_url="/api/docs", openapi_url="/api/openapi.json")
 app.add_middleware(CORSMiddleware, allow_origins=ORIGINS, allow_methods=["GET"], allow_headers=["*"])
@@ -143,7 +143,7 @@ def files(ticker: str, name: str):
     p = OUT_ROOT / t / name
     if not p.exists():
         raise HTTPException(status_code=404, detail="run the analysis first")
-    fn = f"{t}_canonical_dcf.xlsx" if name.endswith(".xlsx") else name
+    fn = f"{t}_{name}" if name.endswith(".xlsx") else name
     return FileResponse(p, filename=fn)
 
 

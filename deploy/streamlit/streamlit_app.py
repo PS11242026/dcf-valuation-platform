@@ -1,7 +1,8 @@
-"""Phoenix Capital analyzer: any US ticker -> live canonical Kalman/state-space DCF -> full report.
+"""Phoenix Capital analyzer: any US ticker -> live Fundamentals Fade DCF (engine v3) -> full report.
 
 Runs on Streamlit Community Cloud (free) and is embedded in the site's Analyze page
-(``?embed=true&t=KO``). It calls the SAME code path as ``python -m dcf_project valuation canonical``
+(``?embed=true&from=site&t=KO``). It calls the SAME code path as
+``python -m dcf_project valuation canonical <T> --engine v3`` (the engine behind the model portfolio)
 via ``dcf_project.api.service.analyze``; this file is presentation only.
 
 Secrets (Streamlit Cloud -> app -> Settings -> Secrets):
@@ -108,8 +109,8 @@ def vcls(v: str) -> str:
 
 # ---------------------------------------------------------------- engine (cached per ticker)
 @st.cache_data(ttl=12 * 3600, show_spinner=False, max_entries=200)
-def run(ticker: str) -> dict:
-    rep = service.analyze(ticker, OUT)
+def run(ticker: str, engine: str = service.DEFAULT_ENGINE) -> dict:
+    rep = service.analyze(ticker, OUT, engine)
     files = {}
     for kind, name in (rep.get("files") or {}).items():
         p = OUT / rep["ticker"] / name
@@ -126,7 +127,7 @@ embedded = qp.get("from") == "site"   # set by the site's Analyze page (Streamli
 
 if not embedded:
     st.markdown("### Analyze any company")
-    st.caption("Live Kalman-filtered state-space DCF from SEC filings. Part of "
+    st.caption("Live Fundamentals Fade DCF (engine v3, the model portfolio's engine) from SEC filings. Part of "
                f"[Phoenix Capital]({SITE}), a portfolio project; not investment advice.")
 if embedded:          # the site's own search box drives the embedded analyzer
     raw, go = t0, False
@@ -142,7 +143,7 @@ if go and ticker:
     st.query_params["t"] = ticker
 if not ticker:
     st.info("Type a US ticker and press **Run DCF**. A full report takes about 20–60 seconds "
-            "(SEC filings → Kalman filter → DCF → sensitivity → report).")
+            "(SEC filings → economic drivers → fade to terminal → sensitivity → report).")
     st.stop()
 
 try:
@@ -156,9 +157,9 @@ if not os.environ.get("DCF_SEC_USER_AGENT"):
                "accepts requests.")
 
 try:
-    with st.status(f"Running the canonical DCF on {ticker}…", expanded=False) as status:
-        st.write("Fetching SEC filings and market data · fitting the Kalman state-space FCF model · "
-                 "discounting cash flows · building the report")
+    with st.status(f"Running the Fundamentals Fade DCF on {ticker}…", expanded=False) as status:
+        st.write("Fetching SEC filings and market data · deriving economic drivers (growth, margin, RONIC, "
+                 "reinvestment) · fading them to a Grinold-Kroner terminal · building the report")
         r = run(ticker)
         status.update(label=f"{ticker} analyzed", state="complete")
 except service.AnalysisError as e:
@@ -209,7 +210,7 @@ if pdf:
                        mime="application/pdf")
 
 k1, k2, k3, k4 = st.columns(4)
-k1.metric("DCF intrinsic / share", fmt(iv, "usd"), help=f"P50 {fmt(r.get('p50'), 'usd')} · engine {r.get('engine')}")
+k1.metric("DCF intrinsic / share", fmt(iv, "usd"), help=r.get("engine_label"))
 k2.metric("Price at analysis", fmt(px, "usd"))
 k3.metric("Upside to intrinsic", pct(d), delta=pct(d), delta_color="normal" if d is not None else "off")
 k4.markdown(f"<div style='font-size:14px;color:#5B6675'>Verdict</div><div style='margin-top:6px'>"
@@ -217,7 +218,7 @@ k4.markdown(f"<div style='font-size:14px;color:#5B6675'>Verdict</div><div style=
             f"<div class='fine' style='margin-top:6px'>{html.escape(r.get('confidence') or '')}</div>",
             unsafe_allow_html=True)
 
-if rng[0] is not None and rng[1] is not None and iv:
+if rng[0] is not None and rng[1] is not None and iv and abs(rng[1] - rng[0]) > 0.005 * abs(iv):
     lo = min(rng[0], px or rng[0], iv) * 0.9
     hi = max(rng[1], px or rng[1], iv) * 1.05
 
@@ -262,7 +263,7 @@ try:
             tooltip=["label", "series", alt.Tooltip("value:Q", format=",.0f", title="$M")])
         rule = alt.Chart(pd.DataFrame({"i": [n - 0.5]})).mark_rule(strokeDash=[3, 4], color="#C4CBD4").encode(x="i:Q")
         st.markdown("**Revenue & free cash flow** <span class='fine'>quarterly · reported history, then the "
-                    "Kalman-filtered forecast (dashed)</span>", unsafe_allow_html=True)
+                    "Fundamentals Fade forecast (dashed)</span>", unsafe_allow_html=True)
         st.altair_chart((ch + rule).properties(height=280), width="stretch")
 except Exception:  # noqa: BLE001 -- the chart is decorative; never lose the report over it
     pass
@@ -301,6 +302,7 @@ if secs:
             if nar:
                 st.markdown("\n".join(f"**{x}**" if x.endswith(":") else f"- {x}" for x in nar))
 
-st.markdown(f"<p class='fine' style='margin-top:18px'>Generated live by the open-source canonical engine "
-            f"({html.escape(str(r.get('engine')))}) from SEC EDGAR filings and market data. Research and education "
+st.markdown(f"<p class='fine' style='margin-top:18px'>Generated live by the open-source "
+            f"{html.escape(str(r.get('engine_label') or r.get('engine')))}: {html.escape(str(r.get('model_title') or ''))}. "
+            "Data: SEC EDGAR filings and market data. Research and education "
             "only; not investment advice.</p>", unsafe_allow_html=True)

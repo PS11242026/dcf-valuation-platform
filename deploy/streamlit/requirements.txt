@@ -1,2 +1,2 @@
-streamlit>=1.50
+streamlit>=1.50,<1.68
 dcf-project[api] @ git+https://github.com/PS11242026/dcf-valuation-platform.git@main
