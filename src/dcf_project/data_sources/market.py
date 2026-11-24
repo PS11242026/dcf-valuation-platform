@@ -24,60 +24,59 @@ class MarketClient:
         self.settings = settings
 
     def snapshot(self, ticker: str) -> MarketSnapshot:
+        """Price / shares / market cap / beta for one ticker.
+
+        Primary source is yfinance ``get_info``. Cloud hosts are often rate-limited or handed a
+        near-empty quoteSummary, so every MISSING field is then filled, in order, from: yfinance
+        fast_info + last close, Yahoo's public chart endpoint, Finnhub (when DCF_FINNHUB_KEY /
+        FINNHUB_KEY is set) and yahooquery. Values already present are never overwritten."""
+        info: dict = {}
+        err: Exception | None = None
         try:
             import yfinance as yf
-        except ImportError:
+
+            info = yf.Ticker(ticker).get_info() or {}
+        except Exception as exc:  # noqa: BLE001 -- ImportError, rate limit, network
+            err = exc
+        q = {
+            "price": _float_or_none(info.get("currentPrice") or info.get("regularMarketPrice")),
+            "shares": _float_or_none(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding")),
+            "market_cap": _float_or_none(info.get("marketCap")),
+            "currency": info.get("currency"),
+            "beta": _float_or_none(info.get("beta")),
+        }
+        providers = ["Yahoo Finance"] if q["price"] else []
+        for name, fill in (("Yahoo Finance", _fill_yf_fast),
+                           ("Yahoo Finance chart", _fill_yahoo_chart),
+                           ("Finnhub", _fill_finnhub),
+                           ("yahooquery", lambda t, d: _fill_yahooquery(t, d, self.settings))):
+            if q["price"] is not None and (q["shares"] is not None or q["market_cap"] is not None):
+                break
+            before = dict(q)
             try:
-                from dcf_project.data_sources.yahoo import YahooQueryClient
-
-                return YahooQueryClient(self.settings).snapshot(ticker)
-            except Exception as fallback_exc:
-                raise MarketDataError("Yahoo market data dependency is required") from fallback_exc
-
-        try:
-            info = yf.Ticker(ticker).get_info()
-        except Exception as exc:
-            try:
-                from dcf_project.data_sources.yahoo import YahooQueryClient
-
-                return YahooQueryClient(self.settings).snapshot(ticker)
-            except Exception:
-                raise MarketDataError(f"Yahoo Finance query failed for {ticker}: {exc}") from exc
-        if not info:
-            raise MarketDataError(f"No Yahoo Finance data returned for {ticker}")
-        price = _float_or_none(info.get("currentPrice") or info.get("regularMarketPrice"))
-        shares = _float_or_none(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"))
-        market_cap = _float_or_none(info.get("marketCap"))
-        currency = info.get("currency")
-        # Cloud hosts often get a near-empty quoteSummary (`get_info`) from Yahoo while the chart
-        # endpoint still answers. Fill only the MISSING fields: fast_info first, then yahooquery.
-        if price is None or (shares is None and market_cap is None):
-            price, shares, market_cap, currency = _fill_quote(ticker, price, shares, market_cap, currency)
-            if price is None or (shares is None and market_cap is None):
-                try:
-                    from dcf_project.data_sources.yahoo import YahooQueryClient
-
-                    yq = YahooQueryClient(self.settings).snapshot(ticker)
-                    price = price if price is not None else yq.price
-                    shares = shares if shares is not None else yq.shares_outstanding
-                    market_cap = market_cap if market_cap is not None else yq.market_cap
-                    currency = currency or yq.currency
-                except Exception:  # noqa: BLE001 -- best-effort fallback
-                    pass
-        if market_cap is None and price is not None and shares is not None:
-            market_cap = price * shares
-        if shares is None and market_cap is not None and price:
-            shares = market_cap / price
+                fill(ticker, q)
+            except Exception:  # noqa: BLE001 -- best-effort fallback chain
+                pass
+            if q != before and name not in providers:
+                providers.append(name)
+        if q["market_cap"] is None and q["price"] is not None and q["shares"] is not None:
+            q["market_cap"] = q["price"] * q["shares"]
+        if q["shares"] is None and q["market_cap"] is not None and q["price"]:
+            q["shares"] = q["market_cap"] / q["price"]
+        if not info and q["price"] is None and q["market_cap"] is None:
+            raise MarketDataError(f"No market data for {ticker} from Yahoo, Finnhub or yahooquery"
+                                  + (f" ({err})" if err else ""))
         return MarketSnapshot(
             ticker=ticker.upper(),
-            price=price,
-            market_cap=market_cap,
-            shares_outstanding=shares,
-            beta=_float_or_none(info.get("beta")),
+            price=q["price"],
+            market_cap=q["market_cap"],
+            shares_outstanding=q["shares"],
+            beta=q["beta"],
             cash=_float_or_none(info.get("totalCash")),
             debt=_float_or_none(info.get("totalDebt")),
-            currency=currency,
-            source=SourceMeta(provider="Yahoo Finance", key=ticker.upper(), url=f"https://finance.yahoo.com/quote/{ticker}"),
+            currency=q["currency"],
+            source=SourceMeta(provider=" + ".join(providers) or "Yahoo Finance", key=ticker.upper(),
+                              url=f"https://finance.yahoo.com/quote/{ticker}"),
         )
 
     def risk_free_rate(self) -> tuple[float, str]:
@@ -170,35 +169,77 @@ def _bound(value: float, low: float, high: float) -> float:
     return min(max(value, low), high)
 
 
-def _fill_quote(ticker: str, price, shares, market_cap, currency):
-    """Fill missing price / shares / market cap from yfinance ``fast_info`` (chart endpoint),
-    then from the last daily close. Never overwrites a value already present."""
-    try:
-        import yfinance as yf
 
-        t = yf.Ticker(ticker)
-        fi = t.fast_info
-        def _get(*keys):
-            for k in keys:
-                try:
-                    v = _float_or_none(fi[k])
-                except Exception:  # noqa: BLE001
-                    v = None
-                if v:
-                    return v
-            return None
-        price = price if price is not None else _get("lastPrice", "last_price", "regularMarketPrice")
-        shares = shares if shares is not None else _get("shares")
-        market_cap = market_cap if market_cap is not None else _get("marketCap", "market_cap")
-        if currency is None:
+def _set(q: dict, key: str, value) -> None:
+    if q.get(key) is None and value is not None:
+        q[key] = value
+
+
+def _fill_yf_fast(ticker: str, q: dict) -> None:
+    """yfinance fast_info (chart-backed) + last daily close."""
+    import yfinance as yf
+
+    t = yf.Ticker(ticker)
+    fi = t.fast_info
+
+    def get(*keys):
+        for k in keys:
             try:
-                currency = fi["currency"]
+                v = _float_or_none(fi[k])
             except Exception:  # noqa: BLE001
-                pass
-        if price is None:
-            hist = t.history(period="5d", auto_adjust=False)
-            if hist is not None and not hist.empty:
-                price = _float_or_none(hist["Close"].dropna().iloc[-1])
-    except Exception:  # noqa: BLE001 -- best-effort fallback
+                v = None
+            if v:
+                return v
+        return None
+
+    _set(q, "price", get("lastPrice", "last_price", "regularMarketPrice"))
+    _set(q, "shares", get("shares"))
+    _set(q, "market_cap", get("marketCap", "market_cap"))
+    try:
+        _set(q, "currency", fi["currency"])
+    except Exception:  # noqa: BLE001
         pass
-    return price, shares, market_cap, currency
+    if q["price"] is None:
+        hist = t.history(period="5d", auto_adjust=False)
+        if hist is not None and not hist.empty:
+            _set(q, "price", _float_or_none(hist["Close"].dropna().iloc[-1]))
+
+
+def _fill_yahoo_chart(ticker: str, q: dict) -> None:
+    """Yahoo's public chart endpoint (no cookie/crumb session needed)."""
+    r = requests.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
+                     params={"range": "5d", "interval": "1d"}, timeout=10,
+                     headers={"User-Agent": "Mozilla/5.0 (compatible; dcf-valuation-platform)"})
+    r.raise_for_status()
+    meta = ((r.json().get("chart") or {}).get("result") or [{}])[0].get("meta") or {}
+    _set(q, "price", _float_or_none(meta.get("regularMarketPrice")))
+    _set(q, "currency", meta.get("currency"))
+
+
+def _fill_finnhub(ticker: str, q: dict) -> None:
+    """Finnhub quote + profile (needs DCF_FINNHUB_KEY or FINNHUB_KEY)."""
+    import os
+
+    key = os.environ.get("DCF_FINNHUB_KEY") or os.environ.get("FINNHUB_KEY")
+    if not key:
+        return
+    base = "https://finnhub.io/api/v1"
+    if q["price"] is None:
+        qt = requests.get(f"{base}/quote", params={"symbol": ticker, "token": key}, timeout=10).json()
+        _set(q, "price", _float_or_none(qt.get("c")) or None)
+    if q["shares"] is None and q["market_cap"] is None:
+        pr = requests.get(f"{base}/stock/profile2", params={"symbol": ticker, "token": key}, timeout=10).json()
+        so, mc = _float_or_none(pr.get("shareOutstanding")), _float_or_none(pr.get("marketCapitalization"))
+        _set(q, "shares", so * 1e6 if so else None)          # Finnhub reports millions
+        _set(q, "market_cap", mc * 1e6 if mc else None)
+        _set(q, "currency", pr.get("currency"))
+
+
+def _fill_yahooquery(ticker: str, q: dict, settings: Settings) -> None:
+    from dcf_project.data_sources.yahoo import YahooQueryClient
+
+    yq = YahooQueryClient(settings).snapshot(ticker)
+    _set(q, "price", yq.price)
+    _set(q, "shares", yq.shares_outstanding)
+    _set(q, "market_cap", yq.market_cap)
+    _set(q, "currency", yq.currency)

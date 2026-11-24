@@ -8,6 +8,7 @@ via ``dcf_project.api.service.analyze``; this file is presentation only.
 Secrets (Streamlit Cloud -> app -> Settings -> Secrets):
     DCF_SEC_USER_AGENT = "Your Name your-email@example.com"   # SEC EDGAR contact (required)
     SITE_URL = "https://ps11242026.github.io/phoenix-capital/"   # optional
+    FINNHUB_KEY = "..."   # optional: market-data fallback when Yahoo throttles the cloud host
 """
 from __future__ import annotations
 
@@ -18,12 +19,20 @@ import os
 import tempfile
 from pathlib import Path
 
+import sys
+
 import streamlit as st
+
+# Run the engine from THIS checkout (Streamlit Cloud redeploys the repo on every push but caches
+# the pip-installed package), so engine fixes go live without a dependency-cache rebuild.
+_SRC = Path(__file__).resolve().parents[2] / "src"
+if (_SRC / "dcf_project").is_dir() and str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
 st.set_page_config(page_title="Phoenix Capital · Analyze", page_icon="📈", layout="wide",
                    initial_sidebar_state="collapsed")
 
-for k in ("DCF_SEC_USER_AGENT", "SITE_URL"):
+for k in ("DCF_SEC_USER_AGENT", "SITE_URL", "FINNHUB_KEY", "DCF_FINNHUB_KEY"):
     try:
         if k in st.secrets and not os.environ.get(k):
             os.environ[k] = str(st.secrets[k])
@@ -134,11 +143,11 @@ t0 = (qp.get("t") or "").upper()
 embedded = qp.get("from") == "site"   # set by the site's Analyze page (Streamlit hides `embed`)
 
 if not embedded:      # opened directly: show it as part of the Phoenix Capital platform
-    st.markdown(f"""<div class="pc-bar"><a class="pc-brand" href="{SITE}index.html" target="_top">Phoenix Capital
-<small>research</small></a><nav><a href="{SITE}index.html" target="_top">Dashboard</a>
-<a href="{SITE}us.html" target="_top">Model portfolio</a><a class="on" href="#">Analyze a company</a>
-<a href="{SITE}basket.html" target="_top">Basket</a><a href="{SITE}portfolios.html" target="_top">Create a portfolio</a>
-<a href="{SITE}about.html" target="_top">Methodology</a></nav></div>""", unsafe_allow_html=True)
+    st.markdown(f"""<div class="pc-bar"><a class="pc-brand" href="{SITE}index.html" target="_blank" rel="noopener">Phoenix Capital
+<small>research</small></a><nav><a href="{SITE}index.html" target="_blank" rel="noopener">Dashboard</a>
+<a href="{SITE}us.html" target="_blank" rel="noopener">Model portfolio</a><a class="on" href="#">Analyze a company</a>
+<a href="{SITE}basket.html" target="_blank" rel="noopener">Basket</a><a href="{SITE}portfolios.html" target="_blank" rel="noopener">Create a portfolio</a>
+<a href="{SITE}about.html" target="_blank" rel="noopener">Methodology</a></nav></div>""", unsafe_allow_html=True)
     st.markdown("### Analyze any company")
     st.caption("Live Fundamentals Fade DCF (engine v3, the model portfolio's engine) from SEC filings. Part of "
                f"[Phoenix Capital]({SITE}), a portfolio project; not investment advice.")

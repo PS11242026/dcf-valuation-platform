@@ -45,6 +45,14 @@ def load_fundamentals(ticker: str, settings: Settings) -> FundamentalsBundle:
         market = MarketClient(settings).snapshot(ticker)
         wacc_ticker = ticker
     latest = periods[-1]
+    # Market value of equity from the SEC share count when the market feed has a price but no
+    # shares / market cap (common when Yahoo throttles cloud hosts).
+    if market.market_cap is None and market.price:
+        sec_shares = market.shares_outstanding or _float(latest.shares_outstanding)
+        if sec_shares:
+            market = market.model_copy(update={"shares_outstanding": sec_shares,
+                                               "market_cap": market.price * sec_shares})
+            warnings.append("Market cap derived from price x SEC shares outstanding.")
 
     # Debt is a sticky balance-sheet stock. Some issuers (e.g. Verizon) disclose
     # total interest-bearing debt only in the 10-K, so the latest quarter carries
@@ -100,3 +108,11 @@ def _india_market_snapshot(ticker: str, settings: Settings, warnings: list[str])
     if last is not None:
         return last
     raise MarketDataError(f"No Yahoo market data for India ticker {ticker} (tried {', '.join(candidates)}).")
+
+
+def _float(value) -> float | None:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if v > 0 else None
