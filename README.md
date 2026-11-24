@@ -1,7 +1,7 @@
 # DCF Valuation Platform
 
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
-![Tests](https://img.shields.io/badge/tests-281%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-293%20passing-brightgreen)
 
 A validated discounted-cash-flow research platform organized as **four products** behind a single
 CLI, with **Excel workbooks as the primary deliverable**. The canonical DCF engine — a
@@ -27,7 +27,7 @@ via `yfinance` (price / shares / beta with fallbacks), and the U.S. Treasury par
   on-demand PDF and PowerPoint renderers from a single write-once `ReportModel`.
 - **A full research layer** — survivorship-robust, capacity- and cost-aware backtests of the
   discount-to-intrinsic signal, packaged into a reproducible FAJ-style paper.
-- **281 tests, all green** — `python -m pytest`.
+- **293 tests, all green** — `python -m pytest`.
 
 ## Quick start
 
@@ -75,6 +75,19 @@ inception, capital, strategy and signal version.
 python -m dcf_project research build-paper                       # -> reports/paper/
 ```
 
+### 5. On-demand analysis API + research desk
+```bash
+pip install -e ".[api]"
+uvicorn dcf_project.api.app:app --port 7860      # GET /api/analyze/{ticker} (job + poll), /api/docs
+```
+Any US ticker -> the same canonical Kalman/state-space valuation as `valuation canonical`, returned
+as a JSON report (every ReportModel section) plus the Excel workbook and PDF. The static site's
+**Analyze** page calls it (`api_url` in `site_content/site.json` or `DCF_API_URL`); **Basket** and
+**My portfolios** let visitors save names and build paper portfolios, stored in their own browser.
+Deploy for free on Hugging Face Spaces with [`deploy/hf-space/`](deploy/hf-space/). Without the
+validation research files the verdict is *absolute* (discount to the name's own intrinsic value)
+and says so; no relative rank is invented.
+
 ### Export layer (on-demand; Excel stays primary)
 ```bash
 python -m dcf_project export pdf GOOGL
@@ -107,7 +120,7 @@ src/dcf_project/
   site/            static-site generator
   cli.py  __main__.py  paths.py  config.py
 scripts/           paper / portfolio / utilities (the research suite)
-tests/             281 tests
+tests/             293 tests
 docs/              methodology.md, RESEARCH_POLICY.md
 examples/          sample valuation outputs (open directly)
 reports/paper/     the reproducible research package (source md + figures + tables)

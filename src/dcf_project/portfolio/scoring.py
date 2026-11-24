@@ -57,8 +57,28 @@ def _sector_reliability(b: dict) -> dict:
             "long_short_3y": round(ls, 3), "hit_rate_3y": round(hit, 3)}
 
 
+_REFERENCE_FILES = ("_universe_tickers.json", "validation_decile_portfolios.json",
+                    "final_institutional_validation.json")
+
+
 class Reference:
+    """Ranking reference built from the validation research outputs in REPORT_DIR.
+
+    When those files are absent (a fresh deploy that has not run the research suite), the
+    reference is marked ``available = False`` and `score_ticker` falls back to an ABSOLUTE
+    verdict from the name's own discount to intrinsic -- it never invents a relative rank."""
+
     def __init__(self) -> None:
+        self.available = all((REPORT_DIR / f).exists() for f in _REFERENCE_FILES) and (
+            (REPORT_DIR / "_live_universe_snapshot.json").exists()
+            or (REPORT_DIR / "final_universe_backtest.json").exists())
+        if not self.available:
+            self.family_of: dict = {}
+            self.rank_basis = "absolute_discount"
+            self.overall, self.by_sector = [], {}
+            self.decile_return = {3: [None] * 10, 5: [None] * 10}
+            self.sector_reliability, self.sector_ic_3y = {}, {}
+            return
         self.family_of = json.load(open(REPORT_DIR / "_universe_tickers.json"))["family_of"]
         snap_path = REPORT_DIR / "_live_universe_snapshot.json"
         self.rank_basis = "historical_fallback"
@@ -168,6 +188,21 @@ def india_verdict_rank(er_rank: float, discount: float | None) -> float:
     return er_rank
 
 
+def absolute_discount_rank(discount: float | None) -> float:
+    """Map a discount to intrinsic onto the LABELS scale when no relative reference exists."""
+    if discount is None:
+        return 50.0
+    if discount >= 0.30:
+        return 85.0
+    if discount >= 0.10:
+        return 65.0
+    if discount > -0.10:
+        return 50.0
+    if discount > -0.30:
+        return 30.0
+    return 10.0
+
+
 def sector_label(sector: str) -> str:
     return _SECTOR_LABEL.get(sector, (sector or "unknown").replace("_", " ").title())
 
@@ -215,6 +250,17 @@ def score_ticker(ticker: str, ref: Reference, settings=None) -> dict:
         tier = None
         confidence_band = "Preliminary (India)"
         conviction = 0.0
+    elif not getattr(ref, "available", True):
+        # No validation reference on this host: the verdict is the name's ABSOLUTE discount to its
+        # own intrinsic value; there is no relative rank, decile history or sector reliability.
+        er_rank = sec_rank = absolute_discount_rank(discount)
+        decile_idx = min(9, int(er_rank // 10))
+        hist_3y = hist_5y = None
+        rel = None
+        sec_ic = None
+        tier = None
+        confidence_band = "Absolute (no ranking reference)"
+        conviction = 0.0
     else:
         er_rank = ref._pct(ref.overall, discount) if discount is not None else 50.0
         sec_rank = ref._pct(ref.by_sector.get(sector, ref.overall), discount) if discount is not None else 50.0
@@ -253,6 +299,11 @@ def score_ticker(ticker: str, ref: Reference, settings=None) -> dict:
         else:
             qualifiers.append("INDIA REFERENCE PENDING: no India v3 cross-section yet (run Phase B); the relative "
                               "rank is a neutral placeholder. The intrinsic value + absolute verdict are engine-honest.")
+    elif not getattr(ref, "available", True):
+        qualifiers.append("ABSOLUTE VERDICT: no validation reference is loaded on this host, so the verdict "
+                          "reflects only this name's discount to its own DCF intrinsic value (>=30% below = "
+                          "Very Attractive, 10-30% = Attractive, within 10% = Neutral, 10-30% above = "
+                          "Unattractive, >30% above = Very Unattractive). No relative rank is implied.")
     elif rel is None:
         qualifiers.append(f"OUTSIDE VALIDATED UNIVERSE: '{sector}' is not a validated sector family; treat the rank cautiously.")
     elif tier == "weak":
@@ -315,7 +366,10 @@ def _why_reasons(sc: dict) -> list[str]:
         reasons.append(f"Market price is roughly {-d:.0%} above the cash-flow-based intrinsic estimate.")
     sector_name = sector_label(sc.get("sector"))
     tier = sc.get("confidence_tier")
-    if tier is None:
+    if sc.get("rank_basis") == "absolute_discount":
+        reasons.append(f"Classified as {sector_name}; the verdict is absolute (discount to its own "
+                       "intrinsic value), not a rank against other stocks.")
+    elif tier is None:
         reasons.append("Sits outside the validated universe, so the framework's reliability here is unproven.")
     elif tier == "strong":
         reasons.append(f"Sits in {sector_name}, one of the sectors where this framework has ranked stocks most reliably.")

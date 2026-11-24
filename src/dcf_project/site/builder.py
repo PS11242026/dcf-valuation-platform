@@ -78,6 +78,7 @@ DEFAULT_CONFIG = {
     "finnhub_key": "",                                 # feed key: live quotes + live news wire
     "custom_domain": "",                               # e.g. phoenixcapitaldesk.com (writes CNAME)
     "code_url": "https://github.com/PS11242026/dcf-valuation-platform",
+    "api_url": "",                                     # on-demand analysis API (deploy/hf-space)
     "books": [
         {"key": "us", "name": "conf_top10", "label": "US Deep-Discount 10",
          "nav": "Portfolio", "flag": "us", "status_badge": "live"},
@@ -170,6 +171,8 @@ def load_config():
     cfg.update(user or {})
     if os.environ.get("DCF_FINNHUB_KEY"):  # CI secret beats the file, so the key never sits in git
         cfg["finnhub_key"] = os.environ["DCF_FINNHUB_KEY"].strip()
+    if os.environ.get("DCF_API_URL"):      # on-demand analysis backend (Analyze page)
+        cfg["api_url"] = os.environ["DCF_API_URL"].strip()
     return cfg
 
 
@@ -227,11 +230,15 @@ def _page(cfg, books, *, title, active, body, embed=None, depth=0, asof=""):
     items = [("home", "index.html", "Dashboard")]
     items += [(b["cfg"]["key"], f'{b["cfg"]["key"]}.html', b["cfg"].get("nav", b["cfg"]["label"]))
               for b in books.values()]
-    items += [("research", "research.html", "Research"),
-              ("pricing", "pricing.html", "Project"),
+    items += [("analyze", "analyze.html", "Analyze"),
+              ("basket", "basket.html", 'Basket <span class="bcount" hidden></span>'),
+              ("mine", "portfolios.html", "My portfolios"),
+              ("research", "research.html", "Research"),
               ("about", "about.html", "Methodology")]
     nav = "".join(f'<a href="{pre}{href}" class="{"on" if active == key else ""}">{label}</a>'
                   for key, href, label in items)
+    desk = {"api_url": (cfg.get("api_url") or "").rstrip("/"), "finnhub_key": cfg.get("finnhub_key", ""),
+            "prefix": pre, "code_url": cfg.get("code_url", "")}
     data = ""
     if embed is not None:
         embed = dict(embed)
@@ -262,9 +269,11 @@ def _page(cfg, books, *, title, active, body, embed=None, depth=0, asof=""):
   <p class="disc">{DISCLAIMER}</p>
   <div class="foot-meta"><span>© {year} {_esc(cfg["brand"])}</span>
     <span>{_esc(cfg["contact_email"])}</span>
-    <span>data: scheduled cloud pipeline{" + live intraday feed" if cfg.get("finnhub_key") else ""}</span></div>
+    <span>data: scheduled cloud pipeline{" + live intraday feed" if cfg.get("finnhub_key") else ""}</span>
+    <a href="{pre}pricing.html">About this project</a></div>
 </div></footer>
-{data}<script src="{pre}assets/site.js"></script>
+{data}<script>window.DESK = {json.dumps(desk)};</script>
+<script src="{pre}assets/site.js"></script><script src="{pre}assets/desk.js"></script>
 </body></html>"""
 
 
@@ -346,8 +355,11 @@ def _holdings_table(bk):
                 if sym in logos else '<span class="tlogo ph"></span>')
         name_cell = (f'<div class="tk-cell">{logo}<div><b>{_esc(r["ticker"])}</b>'
                      f'<span class="co">{_esc(r.get("company") or "")}</span></div></div>')
+        save = _esc(json.dumps({"ticker": sym, "company": r.get("company") or "",
+                                "intrinsic": r.get("current_intrinsic"), "price": r.get("price"),
+                                "discount": r.get("current_discount"), "source": "model portfolio"}))
         rows.append(
-            f'<tr><td>{name_cell}</td><td><span class="chip">{_esc(_sector(r.get("sector")))}</span></td>'
+            f'<tr data-save="{save}"><td>{name_cell}</td><td><span class="chip">{_esc(_sector(r.get("sector")))}</span></td>'
             f'<td>{_money(r.get("entry_price"), ccy, 2)}</td>'
             f'<td>{_money(r.get("price"), ccy, 2)}</td>'
             f'<td>{_pct(r.get("weight"), 1, False)}</td>'
@@ -614,6 +626,64 @@ past its historical drawdown envelope, the book gets cut, and the post explainin
                  asof=max((b["status"]["as_of"] for b in books.values()), default=""))
 
 
+def _universe(books):
+    """Names researched on the platform (model-book holdings) for the basket / portfolio builder."""
+    out = []
+    for bk in books.values():
+        for h in bk["status"].get("holdings", []):
+            out.append({"ticker": h.get("symbol", h["ticker"]), "company": h.get("company") or "",
+                        "intrinsic": h.get("current_intrinsic"), "price": h.get("price"),
+                        "discount": h.get("current_discount"), "sector": _sector(h.get("sector")),
+                        "source": bk["cfg"]["label"]})
+    return out
+
+
+def _desk_embed(books):
+    return f"<script>window.DESK_UNIVERSE = {json.dumps(_universe(books))};</script>"
+
+
+def page_analyze(cfg, books):
+    picks = "".join(f'<button type="button" class="qpick" data-tk="{_esc(u["ticker"])}">{_esc(u["ticker"])}</button>'
+                    for u in _universe(books)[:10])
+    offline = "" if cfg.get("api_url") else (
+        '<div class="callout" style="margin-top:14px"><b>Analysis server not configured.</b> '
+        'Set <code>api_url</code> in site.json (or DCF_API_URL) to the deployed API.</div>')
+    body = f"""<p class="eyebrow">On-demand research</p><h1>Analyze any company</h1>
+<p class="lede">Type a US ticker. The platform pulls the company's SEC filings and market data,
+runs the <b>Kalman-filtered state-space DCF</b> live, and returns the full report (valuation, forecast,
+sensitivity, drivers and thesis), with the Excel workbook and PDF to download.</p>
+<form class="az-form" id="az-form" autocomplete="off">
+  <input id="az-input" class="az-input" placeholder="Ticker, e.g. KO, MSFT, COST" maxlength="14"
+         aria-label="Ticker symbol" spellcheck="false">
+  <button class="cta az-go" type="submit">Run DCF</button>
+</form>
+<div class="qpicks"><span>From the model portfolio:</span>{picks}</div>
+{offline}
+<div id="az-status"></div>
+<div id="az-report"></div>
+{_desk_embed(books)}"""
+    return _page(cfg, books, title="Analyze", active="analyze", body=body)
+
+
+def page_basket(cfg, books):
+    body = f"""<p class="eyebrow">Saved in this browser</p><h1>Your basket</h1>
+<p class="lede">Companies you've saved from an analysis or from the model portfolio. The basket is
+kept in this browser, so it's here when you come back. Prices update live; select names to build a portfolio.</p>
+<div id="bk-root"></div>
+{_desk_embed(books)}"""
+    return _page(cfg, books, title="Basket", active="basket", body=body)
+
+
+def page_portfolios(cfg, books):
+    body = f"""<p class="eyebrow">Your research, your book</p><h1>My portfolios</h1>
+<p class="lede">Build paper portfolios from your basket and the platform's research. Each one
+records entry prices on the day you create it and tracks live value and return from then on.
+Everything stays in this browser; export a file to move it to another device.</p>
+<div id="pf-root"></div>
+{_desk_embed(books)}"""
+    return _page(cfg, books, title="My portfolios", active="mine", body=body)
+
+
 # ----------------------------- build -----------------------------
 def build(managed_dir=None, out_dir=None, config=None) -> Path:
     out = Path(out_dir) if out_dir else SITE_OUT
@@ -644,7 +714,10 @@ def build(managed_dir=None, out_dir=None, config=None) -> Path:
     pages = {"index.html": page_index(cfg, books, posts),
              "research.html": page_research(cfg, books, posts),
              "pricing.html": page_pricing(cfg, books),
-             "about.html": page_about(cfg, books)}
+             "about.html": page_about(cfg, books),
+             "analyze.html": page_analyze(cfg, books),
+             "basket.html": page_basket(cfg, books),
+             "portfolios.html": page_portfolios(cfg, books)}
     for key in books:
         pages[f"{key}.html"] = page_book(cfg, books, key)
     for p in posts:
