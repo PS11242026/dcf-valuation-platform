@@ -3,8 +3,10 @@ title: Phoenix DCF API
 emoji: 📈
 colorFrom: green
 colorTo: gray
-sdk: docker
-app_port: 7860
+sdk: gradio
+sdk_version: 5.9.1
+python_version: "3.12"
+app_file: app.py
 pinned: false
 short_description: On-demand Kalman-filtered state-space DCF for any US ticker
 ---
