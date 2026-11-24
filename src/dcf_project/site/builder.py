@@ -233,7 +233,9 @@ def _page(cfg, books, *, title, active, body, embed=None, depth=0, asof=""):
     items = [("home", "index.html", "Dashboard")]
     items += [(b["cfg"]["key"], f'{b["cfg"]["key"]}.html', b["cfg"].get("nav", b["cfg"]["label"]))
               for b in books.values()]
-    items += [("research", "research.html", "Research"),
+    items += [("analyze", "analyze.html", "Analyze"),
+              ("mine", "portfolios.html", 'My portfolios <span class="bcount" hidden></span>'),
+              ("research", "research.html", "Research"),
               ("pricing", "pricing.html", "Project"),
               ("about", "about.html", "Methodology")]
     nav = "".join(f'<a href="{pre}{href}" class="{"on" if active == key else ""}">{label}</a>'
@@ -699,7 +701,7 @@ def page_basket(cfg, books):
 kept in this browser, so it's here when you come back. Prices update live; select names to build a portfolio.</p>
 <div id="bk-root"></div>
 {_desk_embed(books)}"""
-    return _page(cfg, books, title="Basket", active="basket", body=body)
+    return _page(cfg, books, title="Basket", active="mine", body=body)
 
 
 def page_portfolios(cfg, books):
