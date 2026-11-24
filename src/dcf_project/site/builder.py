@@ -233,10 +233,8 @@ def _page(cfg, books, *, title, active, body, embed=None, depth=0, asof=""):
     items = [("home", "index.html", "Dashboard")]
     items += [(b["cfg"]["key"], f'{b["cfg"]["key"]}.html', b["cfg"].get("nav", b["cfg"]["label"]))
               for b in books.values()]
-    items += [("analyze", "analyze.html", "Analyze"),
-              ("basket", "basket.html", 'Basket <span class="bcount" hidden></span>'),
-              ("mine", "portfolios.html", "My portfolios"),
-              ("research", "research.html", "Research"),
+    items += [("research", "research.html", "Research"),
+              ("pricing", "pricing.html", "Project"),
               ("about", "about.html", "Methodology")]
     nav = "".join(f'<a href="{pre}{href}" class="{"on" if active == key else ""}">{label}</a>'
                   for key, href, label in items)
@@ -273,8 +271,7 @@ def _page(cfg, books, *, title, active, body, embed=None, depth=0, asof=""):
   <p class="disc">{DISCLAIMER}</p>
   <div class="foot-meta"><span>© {year} {_esc(cfg["brand"])}</span>
     <span>{_esc(cfg["contact_email"])}</span>
-    <span>data: scheduled cloud pipeline{" + live intraday feed" if cfg.get("finnhub_key") else ""}</span>
-    <a href="{pre}pricing.html">About this project</a></div>
+    <span>data: scheduled cloud pipeline{" + live intraday feed" if cfg.get("finnhub_key") else ""}</span></div>
 </div></footer>
 {data}<script>window.DESK = {json.dumps(desk)};</script>
 <script src="{pre}assets/site.js"></script><script src="{pre}assets/desk.js"></script>
@@ -486,7 +483,7 @@ def page_index(cfg, books, posts):
   <a class="cta ghost-inv" href="about.html">Read the methodology</a></div>
   <p class="h-foot">† 42-quarter backtest, net of costs, survivorship-caveated — details on the methodology page.</p>
 </div>"""
-    secs = [hero]
+    secs = [hero, _desk_options()]
     for key, bk in books.items():
         label = _esc(bk["cfg"]["label"])
         secs.append(f"""<section>
@@ -630,6 +627,30 @@ past its historical drawdown envelope, the book gets cut, and the post explainin
                  asof=max((b["status"]["as_of"] for b in books.values()), default=""))
 
 
+def _desk_options():
+    """Home-page entry points to the research desk (the dashboard itself is unchanged)."""
+    return """<section class="desk-opts">
+<a class="dopt" href="analyze.html"><span class="dk">01 · Research</span>
+  <h3>Analyze a company</h3>
+  <p>Type any US ticker and run the Fundamentals Fade DCF live: intrinsic value, fade drivers,
+  terminal value, sensitivity and thesis, with the Excel workbook and PDF.</p>
+  <span class="go">Start an analysis →</span></a>
+<a class="dopt" href="portfolios.html"><span class="dk">02 · Build</span>
+  <h3>Create a portfolio</h3>
+  <p>Save companies to your basket from any analysis or the model portfolio, then build your own
+  paper portfolio and track it live against the S&amp;P 500.</p>
+  <span class="go">Build a portfolio →</span></a>
+</section>"""
+
+
+def _desk_nav(active):
+    tabs = [("analyze", "analyze.html", "Analyze a company"),
+            ("basket", "basket.html", 'Basket <span class="bcount" hidden></span>'),
+            ("mine", "portfolios.html", "My portfolios")]
+    links = "".join(f'<a href="{h}" class="{"on" if k == active else ""}">{lab}</a>' for k, h, lab in tabs)
+    return f'<nav class="desk-nav" aria-label="Research desk"><a class="back" href="index.html">← Dashboard</a>{links}</nav>'
+
+
 def _universe(books):
     """Names researched on the platform (model-book holdings) for the basket / portfolio builder."""
     out = []
@@ -652,7 +673,8 @@ def page_analyze(cfg, books):
     offline = "" if (cfg.get("api_url") or cfg.get("analyzer_url")) else (
         '<div class="callout" style="margin-top:14px"><b>Analysis server not configured.</b> '
         'Set <code>analyzer_url</code> (Streamlit app) or <code>api_url</code> in site.json.</div>')
-    body = f"""<p class="eyebrow">On-demand research</p><h1>Analyze any company</h1>
+    body = f"""{_desk_nav("analyze")}
+<p class="eyebrow">On-demand research</p><h1>Analyze any company</h1>
 <p class="lede">Type a US ticker. The platform pulls the company's SEC filings and market data,
 runs the <b>Fundamentals Fade DCF</b> live (engine v3, the same engine behind the model portfolio) and returns the
 full report (valuation, fade drivers, CAP &amp; persistence, terminal value, sensitivity, attribution and
@@ -671,7 +693,8 @@ thesis), with the Excel workbook and PDF to download.</p>
 
 
 def page_basket(cfg, books):
-    body = f"""<p class="eyebrow">Saved in this browser</p><h1>Your basket</h1>
+    body = f"""{_desk_nav("basket")}
+<p class="eyebrow">Saved in this browser</p><h1>Your basket</h1>
 <p class="lede">Companies you've saved from an analysis or from the model portfolio. The basket is
 kept in this browser, so it's here when you come back. Prices update live; select names to build a portfolio.</p>
 <div id="bk-root"></div>
@@ -680,7 +703,8 @@ kept in this browser, so it's here when you come back. Prices update live; selec
 
 
 def page_portfolios(cfg, books):
-    body = f"""<p class="eyebrow">Your research, your book</p><h1>My portfolios</h1>
+    body = f"""{_desk_nav("mine")}
+<p class="eyebrow">Your research, your book</p><h1>My portfolios</h1>
 <p class="lede">Build paper portfolios from your basket and the platform's research. Each one
 records entry prices on the day you create it and tracks live value and return from then on.
 Everything stays in this browser; export a file to move it to another device.</p>

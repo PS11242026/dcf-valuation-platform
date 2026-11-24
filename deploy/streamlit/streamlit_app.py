@@ -61,6 +61,14 @@ html, body, [class*="css"]{font-family:"Segoe UI Variable Text","Segoe UI",syste
 .rbl{position:relative;height:20px;margin:0 10px 6px;font:11px Consolas,monospace;color:#5B6675}
 .rbl span{position:absolute;transform:translateX(-50%);white-space:nowrap}
 .fine{font-size:12px;color:#8A94A2}
+.pc-bar{display:flex;align-items:center;gap:22px;flex-wrap:wrap;border-bottom:1px solid #E4E7EC;
+  padding:4px 0 12px;margin-bottom:14px}
+.pc-brand{font-family:Georgia,serif;font-weight:700;font-size:17px;color:#0F141B!important;text-decoration:none!important}
+.pc-brand small{font:500 10px "Segoe UI",sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#8A94A2;margin-left:6px}
+.pc-bar nav{display:flex;gap:4px;flex-wrap:wrap;margin-left:auto}
+.pc-bar nav a{font-size:13px;font-weight:600;color:#5B6675!important;padding:6px 10px;border-radius:7px;text-decoration:none!important}
+.pc-bar nav a:hover{background:#F4F6F8}
+.pc-bar nav a.on{background:#EAF5F0;color:#075C44!important}
 div[data-testid="stMetricValue"]{font-family:Consolas,monospace}
 </style>""", unsafe_allow_html=True)
 
@@ -125,7 +133,12 @@ qp = st.query_params
 t0 = (qp.get("t") or "").upper()
 embedded = qp.get("from") == "site"   # set by the site's Analyze page (Streamlit hides `embed`)
 
-if not embedded:
+if not embedded:      # opened directly: show it as part of the Phoenix Capital platform
+    st.markdown(f"""<div class="pc-bar"><a class="pc-brand" href="{SITE}index.html" target="_top">Phoenix Capital
+<small>research</small></a><nav><a href="{SITE}index.html" target="_top">Dashboard</a>
+<a href="{SITE}us.html" target="_top">Model portfolio</a><a class="on" href="#">Analyze a company</a>
+<a href="{SITE}basket.html" target="_top">Basket</a><a href="{SITE}portfolios.html" target="_top">Create a portfolio</a>
+<a href="{SITE}about.html" target="_top">Methodology</a></nav></div>""", unsafe_allow_html=True)
     st.markdown("### Analyze any company")
     st.caption("Live Fundamentals Fade DCF (engine v3, the model portfolio's engine) from SEC filings. Part of "
                f"[Phoenix Capital]({SITE}), a portfolio project; not investment advice.")

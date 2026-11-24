@@ -48,8 +48,26 @@ class MarketClient:
         price = _float_or_none(info.get("currentPrice") or info.get("regularMarketPrice"))
         shares = _float_or_none(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"))
         market_cap = _float_or_none(info.get("marketCap"))
+        currency = info.get("currency")
+        # Cloud hosts often get a near-empty quoteSummary (`get_info`) from Yahoo while the chart
+        # endpoint still answers. Fill only the MISSING fields: fast_info first, then yahooquery.
+        if price is None or (shares is None and market_cap is None):
+            price, shares, market_cap, currency = _fill_quote(ticker, price, shares, market_cap, currency)
+            if price is None or (shares is None and market_cap is None):
+                try:
+                    from dcf_project.data_sources.yahoo import YahooQueryClient
+
+                    yq = YahooQueryClient(self.settings).snapshot(ticker)
+                    price = price if price is not None else yq.price
+                    shares = shares if shares is not None else yq.shares_outstanding
+                    market_cap = market_cap if market_cap is not None else yq.market_cap
+                    currency = currency or yq.currency
+                except Exception:  # noqa: BLE001 -- best-effort fallback
+                    pass
         if market_cap is None and price is not None and shares is not None:
             market_cap = price * shares
+        if shares is None and market_cap is not None and price:
+            shares = market_cap / price
         return MarketSnapshot(
             ticker=ticker.upper(),
             price=price,
@@ -58,7 +76,7 @@ class MarketClient:
             beta=_float_or_none(info.get("beta")),
             cash=_float_or_none(info.get("totalCash")),
             debt=_float_or_none(info.get("totalDebt")),
-            currency=info.get("currency"),
+            currency=currency,
             source=SourceMeta(provider="Yahoo Finance", key=ticker.upper(), url=f"https://finance.yahoo.com/quote/{ticker}"),
         )
 
@@ -150,3 +168,37 @@ def _float_or_none(value: object) -> float | None:
 
 def _bound(value: float, low: float, high: float) -> float:
     return min(max(value, low), high)
+
+
+def _fill_quote(ticker: str, price, shares, market_cap, currency):
+    """Fill missing price / shares / market cap from yfinance ``fast_info`` (chart endpoint),
+    then from the last daily close. Never overwrites a value already present."""
+    try:
+        import yfinance as yf
+
+        t = yf.Ticker(ticker)
+        fi = t.fast_info
+        def _get(*keys):
+            for k in keys:
+                try:
+                    v = _float_or_none(fi[k])
+                except Exception:  # noqa: BLE001
+                    v = None
+                if v:
+                    return v
+            return None
+        price = price if price is not None else _get("lastPrice", "last_price", "regularMarketPrice")
+        shares = shares if shares is not None else _get("shares")
+        market_cap = market_cap if market_cap is not None else _get("marketCap", "market_cap")
+        if currency is None:
+            try:
+                currency = fi["currency"]
+            except Exception:  # noqa: BLE001
+                pass
+        if price is None:
+            hist = t.history(period="5d", auto_adjust=False)
+            if hist is not None and not hist.empty:
+                price = _float_or_none(hist["Close"].dropna().iloc[-1])
+    except Exception:  # noqa: BLE001 -- best-effort fallback
+        pass
+    return price, shares, market_cap, currency
