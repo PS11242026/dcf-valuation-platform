@@ -37,7 +37,7 @@ def _read_envelope(path: Path, max_age_days: int) -> dict[str, Any] | None:
         retrieved_at = datetime.fromisoformat(envelope["retrieved_at"])
     except (OSError, ValueError, KeyError, json.JSONDecodeError):
         return None  # unreadable/corrupt cache entries behave as misses
-    if datetime.now(timezone.utc) - retrieved_at > timedelta(days=max_age_days):
+    if datetime.now(timezone.utc) - retrieved_at >= timedelta(days=max_age_days):  # 0 days == always stale
         return None
     return envelope
 
